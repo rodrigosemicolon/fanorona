@@ -11,6 +11,8 @@ type Board struct {
 	BoardState [5][9]int
 	Rows       int
 	Cols       int
+	Turn       int
+	LastMove   Move
 }
 
 //move struct
@@ -41,6 +43,7 @@ func NewBoard() *Board {
 		},
 		Rows: 5,
 		Cols: 9,
+		Turn: 1,
 	}
 	return &board
 
@@ -81,6 +84,27 @@ func (board *Board) IsValid(position Pos) bool {
 	}
 }
 
+func (board *Board) CapturesAvailable() []Move {
+	captures := make([]Move, 0)
+	for i, row := range board.BoardState {
+		for j, piece := range row {
+			if piece == board.Turn {
+				for hOffset := -1; hOffset <= 1; hOffset++ {
+					for vOffset := -1; vOffset <= 1; vOffset++ {
+						m := board.NewMove(Pos{i, j}, Pos{i + hOffset, j + vOffset})
+						if m.Invalid == nil {
+							if m.IsCapture {
+								captures = append(captures, m)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return captures
+}
+
 //check if any pieces are captured following a certain move
 func (board *Board) CheckCaptures(lastMove Move) (bool, []Pos) {
 	horizontalShift := lastMove.EndingPos.X - lastMove.InitialPos.X
@@ -107,7 +131,7 @@ func (board *Board) CheckCaptures(lastMove Move) (bool, []Pos) {
 		} else {
 			break
 		}
-		nextPieceB = Pos{nextPieceB.X + horizontalShift, nextPieceB.Y + verticalShift}
+		nextPieceB = Pos{nextPieceB.X - horizontalShift, nextPieceB.Y - verticalShift}
 	}
 	if len(captured) > 0 {
 		return true, captured
@@ -117,8 +141,17 @@ func (board *Board) CheckCaptures(lastMove Move) (bool, []Pos) {
 }
 
 //create a new move if the positions are valid
-func (board *Board) NewMove(player int, mFrom Pos, mTo Pos) Move {
-	if player != board.BoardState[mFrom.X][mFrom.Y] {
+func (board *Board) NewMove(mFrom Pos, mTo Pos) Move {
+
+	if !board.IsValid(mFrom) {
+		return Move{Invalid: errors.New("Must select a piece on the board")}
+	}
+
+	if !board.IsValid(mTo) {
+		return Move{Invalid: errors.New("Pieces can't move out of bounds")}
+	}
+
+	if board.Turn != board.BoardState[mFrom.X][mFrom.Y] {
 		return Move{Invalid: errors.New("Players must move their own pieces")}
 
 	}
@@ -140,7 +173,7 @@ func (board *Board) NewMove(player int, mFrom Pos, mTo Pos) Move {
 		//strong intersection
 		if 1 <= (horizontalShift+verticalShift) && (horizontalShift+verticalShift) <= 2 {
 			m := Move{
-				Player:     player,
+				Player:     board.Turn,
 				InitialPos: mFrom,
 				EndingPos:  mTo,
 				Invalid:    nil,
@@ -154,7 +187,7 @@ func (board *Board) NewMove(player int, mFrom Pos, mTo Pos) Move {
 		//weak intersection
 		if horizontalShift+verticalShift == 1 {
 			m := Move{
-				Player:     player,
+				Player:     board.Turn,
 				InitialPos: mFrom,
 				EndingPos:  mTo,
 				Invalid:    nil,
@@ -170,14 +203,15 @@ func (board *Board) NewMove(player int, mFrom Pos, mTo Pos) Move {
 }
 
 //applying a move
-//returning the id of the player moving in the next turn and whether he can skip his move or not
-//if the player id returned is -2 or 2, player -1 or 1 has won (respectively)
-func (gameBoard *Board) ApplyMove(m Move) (int, bool) {
+//returning an int representing whether the game has ended and who won
+func (gameBoard *Board) ApplyMove(m Move) int {
 	gameBoard.BoardState[m.InitialPos.X][m.InitialPos.Y] = 0
 	gameBoard.BoardState[m.EndingPos.X][m.EndingPos.Y] = m.Player
+	gameBoard.LastMove = m
 	//if no captures its the other players turn
 	if !m.IsCapture {
-		return -m.Player, false
+		gameBoard.Turn = -m.Player
+
 	} else {
 		for _, piece := range m.CappedPieces {
 			gameBoard.BoardState[piece.X][piece.Y] = 0
@@ -185,12 +219,24 @@ func (gameBoard *Board) ApplyMove(m Move) (int, bool) {
 		//CHECK WIN
 		white, black := gameBoard.CheckPieces()
 		if white == 0 || black == 0 {
-			return m.Player * 2, false
+			return m.Player
 		}
 		//MISSING CHECK IF NO LEGAL MOVES AVAILABLE
-		return m.Player, true
-	}
 
+	}
+	return 0
+
+}
+
+func (gameBoard *Board) CopyBoard() *Board {
+	newB := Board{
+		BoardState: gameBoard.BoardState,
+		Rows:       gameBoard.Rows,
+		Cols:       gameBoard.Cols,
+		Turn:       gameBoard.Turn,
+		LastMove:   gameBoard.LastMove,
+	}
+	return &newB
 }
 
 //print board to terminal
