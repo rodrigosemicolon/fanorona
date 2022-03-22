@@ -37,7 +37,7 @@ func NewBoard() *Board {
 		BoardState: [5][9]int{
 			{-1, -1, -1, -1, -1, -1, -1, -1, -1},
 			{-1, -1, -1, -1, -1, -1, -1, -1, -1},
-			{-1, 1, -1, 1, 0, 1, -1, 1, -1},
+			{-1, 1, -1, 1, 0, -1, 1, -1, 1},
 			{1, 1, 1, 1, 1, 1, 1, 1, 1},
 			{1, 1, 1, 1, 1, 1, 1, 1, 1},
 		},
@@ -137,6 +137,53 @@ func (board *Board) CheckCaptures(lastMove Move) (bool, []Pos) {
 		return true, captured
 	} else {
 		return false, nil
+	}
+}
+
+func (board *Board) NewRecapture(first Pos, second Pos) Move {
+	var recap Move
+	if first.X == board.LastMove.EndingPos.X && first.Y == board.LastMove.EndingPos.Y {
+		recap = board.NewMove(first, second)
+	} else {
+		recap = Move{Invalid: errors.New("Must recapture with the same piece")}
+	}
+	return recap
+}
+func equals(p1 Pos, p2 Pos) bool {
+	if p1.X == p2.X && p1.Y == p2.Y {
+		return true
+	} else {
+		return false
+	}
+}
+func Game(board *Board, inputs chan [2]Pos, output chan string) {
+	var moves [2]Pos
+	var history = make([]Move, 0)
+
+	var isOver int
+	for i := 0; isOver == 0; i++ {
+		moves = <-inputs
+		Mv := board.NewMove(moves[0], moves[1])
+		if Mv.Invalid != nil {
+			isOver = board.ApplyMove(Mv)
+			output <- board.ToString() //for debugging
+			history = append(history, Mv)
+			for Mv.IsCapture {
+				moves = <-inputs
+				if equals(moves[0], moves[1]) {
+					break
+				}
+				newCap := board.NewRecapture(moves[0], moves[1])
+				if newCap.Invalid != nil {
+					Mv = newCap
+					isOver = board.ApplyMove(Mv)
+					output <- board.ToString() //for debugging
+
+					history = append(history, Mv)
+				}
+			}
+		}
+
 	}
 }
 
@@ -278,4 +325,47 @@ func (board *Board) PrintBoard() {
 		}
 
 	}
+}
+
+//print board to terminal
+func (board *Board) ToString() string {
+	var str string
+	str += "    0       1       2       3       4       5       6       7       8 "
+	for i, row := range board.BoardState {
+		str += fmt.Sprintf("%d ", i)
+
+		for j, piece := range row {
+			if j < 8 {
+				if piece == -1 {
+					str += fmt.Sprintf(" %d  -- ", piece)
+
+				} else {
+					str += fmt.Sprintf("  %d  -- ", piece)
+
+				}
+			} else {
+				if piece == -1 {
+					str += fmt.Sprintf(" %d  ", piece)
+
+				} else {
+					str += fmt.Sprintf("  %d  ", piece)
+
+				}
+			}
+		}
+		if i < 4 {
+			if i%2 == 0 {
+				str += fmt.Sprintf("\n    |   \\   |   /   |   \\   |   /   |   \\   |   /   |   \\   |   /   |")
+				str += fmt.Sprintf("\n    |     \\ | /     |     \\ | /     |     \\ | /     |     \\ | /     |")
+
+			} else {
+				str += fmt.Sprintf("\n    |   /   |   \\   |   /   |   \\   |   /   |   \\   |   /   |   \\   |")
+				str += fmt.Sprintf("\n    | /     |     \\ | /     |     \\ | /     |     \\ | /     |     \\ |")
+
+			}
+
+		}
+
+	}
+	return str
 }
