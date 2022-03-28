@@ -1,0 +1,382 @@
+/*
+package game
+
+import (
+	"errors"
+	"fmt"
+	"math"
+)
+
+type Game struct {
+	Board   Board
+	History []Move
+}
+
+//general board state struct
+type Board struct {
+	BoardState [5][9]int
+	Rows       int
+	Cols       int
+	Turn       int
+	LastMove   Move
+}
+
+//move struct
+type Move struct {
+	Player       int
+	InitialPos   Pos
+	EndingPos    Pos
+	IsCapture    bool
+	CappedPieces []Pos
+	Invalid      error
+}
+
+//board position struct
+type Pos struct {
+	X int
+	Y int
+}
+
+//create a default starting board
+func NewBoard() *Board {
+	board := Board{
+		BoardState: [5][9]int{
+			{-1, -1, -1, -1, -1, -1, -1, -1, -1},
+			{-1, -1, -1, -1, -1, -1, -1, -1, -1},
+			{-1, 1, -1, 1, 0, -1, 1, -1, 1},
+			{1, 1, 1, 1, 1, 1, 1, 1, 1},
+			{1, 1, 1, 1, 1, 1, 1, 1, 1},
+		},
+		Rows: 5,
+		Cols: 9,
+		Turn: 1,
+	}
+	return &board
+
+}
+
+//create a Board instance from a given position
+func NewBoardFromArray(state [5][9]int) *Board {
+	board := Board{
+		BoardState: state,
+		Rows:       5,
+		Cols:       9,
+	}
+	return &board
+}
+
+//check the amount of pieces for both players
+func (board *Board) CheckPieces() (int, int) {
+	var whitePieces int
+	var blackPieces int
+	for _, row := range board.BoardState {
+		for _, piece := range row {
+			if piece == 1 {
+				whitePieces++
+			} else if piece == -1 {
+				blackPieces++
+			}
+		}
+	}
+	return whitePieces, blackPieces
+}
+
+//check if a position falls within the borders of the game board
+func (board *Board) IsValid(position Pos) bool {
+	if 0 <= position.X && position.X < board.Rows && 0 <= position.Y && position.Y < board.Cols {
+		return true
+	} else {
+		return false
+	}
+}
+
+func (board *Board) CapturesAvailable() []Move {
+	captures := make([]Move, 0)
+	for i, row := range board.BoardState {
+		for j, piece := range row {
+			if piece == board.Turn {
+				for hOffset := -1; hOffset <= 1; hOffset++ {
+					for vOffset := -1; vOffset <= 1; vOffset++ {
+						m := board.NewMove(Pos{i, j}, Pos{i + hOffset, j + vOffset})
+						if m.Invalid == nil {
+							if m.IsCapture {
+								captures = append(captures, m)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return captures
+}
+
+//check if any pieces are captured following a certain move
+func (board *Board) CheckCaptures(lastMove Move) (bool, []Pos) {
+	horizontalShift := lastMove.EndingPos.X - lastMove.InitialPos.X
+	verticalShift := lastMove.EndingPos.Y - lastMove.InitialPos.Y
+	var nextPieceF, nextPieceB Pos
+	nextPieceF = Pos{lastMove.EndingPos.X + horizontalShift, lastMove.EndingPos.Y + verticalShift}
+	nextPieceB = Pos{lastMove.InitialPos.X - horizontalShift, lastMove.InitialPos.Y - verticalShift}
+
+	var captured = make([]Pos, 0)
+
+	for board.IsValid(nextPieceF) {
+		if board.BoardState[nextPieceF.X][nextPieceF.Y] == -lastMove.Player {
+
+			captured = append(captured, nextPieceF)
+		} else {
+			break
+		}
+		nextPieceF = Pos{nextPieceF.X + horizontalShift, nextPieceF.Y + verticalShift}
+	}
+	for board.IsValid(nextPieceB) {
+		if board.BoardState[nextPieceB.X][nextPieceB.Y] == -lastMove.Player {
+
+			captured = append(captured, nextPieceB)
+		} else {
+			break
+		}
+		nextPieceB = Pos{nextPieceB.X - horizontalShift, nextPieceB.Y - verticalShift}
+	}
+	if len(captured) > 0 {
+		return true, captured
+	} else {
+		return false, nil
+	}
+}
+
+func (board *Board) NewRecapture(first Pos, second Pos) Move {
+	var recap Move
+	if first.X == board.LastMove.EndingPos.X && first.Y == board.LastMove.EndingPos.Y {
+		recap = board.NewMove(first, second)
+	} else {
+		recap = Move{Invalid: errors.New("Must recapture with the same piece")}
+	}
+	return recap
+}
+func equals(p1 Pos, p2 Pos) bool {
+	if p1.X == p2.X && p1.Y == p2.Y {
+		return true
+	} else {
+		return false
+	}
+}
+func Game(board *Board, inputs chan [2]Pos, output chan string) {
+	var moves [2]Pos
+	var history = make([]Move, 0)
+	var isOver int
+
+	defer close(inputs)
+	defer close(output)
+
+	for i := 0; isOver == 0; i++ {
+		moves = <-inputs
+		Mv := board.NewMove(moves[0], moves[1])
+		if Mv.Invalid == nil {
+			isOver = board.ApplyMove(Mv)
+			output <- board.ToString()
+			history = append(history, Mv)
+			for Mv.IsCapture {
+				moves = <-inputs
+				if equals(moves[0], moves[1]) {
+					break
+				}
+				newCap := board.NewRecapture(moves[0], moves[1])
+				if newCap.Invalid != nil {
+					Mv = newCap
+					isOver = board.ApplyMove(Mv)
+
+					history = append(history, Mv)
+				}
+			}
+		}
+		output <- board.ToString()
+
+	}
+
+}
+
+//create a new move if the positions are valid
+func (board *Board) NewMove(mFrom Pos, mTo Pos) Move {
+
+	if !board.IsValid(mFrom) {
+		return Move{Invalid: errors.New("Must select a piece on the board")}
+	}
+
+	if !board.IsValid(mTo) {
+		return Move{Invalid: errors.New("Pieces can't move out of bounds")}
+	}
+
+	if board.Turn != board.BoardState[mFrom.X][mFrom.Y] {
+		return Move{Invalid: errors.New("Players must move their own pieces")}
+
+	}
+
+	if board.BoardState[mTo.X][mTo.Y] != 0 {
+		return Move{Invalid: errors.New("Can't move a piece to a place already containing another")}
+	}
+
+	horizontalShift := math.Abs(float64(mFrom.X - mTo.X))
+	verticalShift := math.Abs(float64(mFrom.Y - mTo.Y))
+
+	if horizontalShift < 0 || horizontalShift > 1 {
+		return Move{Invalid: errors.New("Can only move one place at a time")}
+	}
+	if verticalShift < 0 || verticalShift > 1 {
+		return Move{Invalid: errors.New("Can only move one place at a time")}
+	}
+	if (mFrom.X+mFrom.Y)%2 == 0 {
+		//strong intersection
+		if 1 <= (horizontalShift+verticalShift) && (horizontalShift+verticalShift) <= 2 {
+			m := Move{
+				Player:     board.Turn,
+				InitialPos: mFrom,
+				EndingPos:  mTo,
+				Invalid:    nil,
+			}
+			m.IsCapture, m.CappedPieces = board.CheckCaptures(m)
+			return m
+		} else {
+			return Move{Invalid: errors.New("Invalid move")}
+		}
+	} else {
+		//weak intersection
+		if horizontalShift+verticalShift == 1 {
+			m := Move{
+				Player:     board.Turn,
+				InitialPos: mFrom,
+				EndingPos:  mTo,
+				Invalid:    nil,
+			}
+			m.IsCapture, m.CappedPieces = board.CheckCaptures(m)
+			return m
+
+		} else {
+			return Move{Invalid: errors.New("Invalid move")}
+		}
+	}
+
+}
+
+//applying a move
+//returning an int representing whether the game has ended and who won
+func (gameBoard *Board) ApplyMove(m Move) int {
+	gameBoard.BoardState[m.InitialPos.X][m.InitialPos.Y] = 0
+	gameBoard.BoardState[m.EndingPos.X][m.EndingPos.Y] = m.Player
+	gameBoard.LastMove = m
+	//if no captures its the other players turn
+	if !m.IsCapture {
+		gameBoard.Turn = -m.Player
+
+	} else {
+		for _, piece := range m.CappedPieces {
+			gameBoard.BoardState[piece.X][piece.Y] = 0
+		}
+		//CHECK WIN
+		white, black := gameBoard.CheckPieces()
+		if white == 0 || black == 0 {
+			return m.Player
+		}
+		//MISSING CHECK IF NO LEGAL MOVES AVAILABLE
+
+	}
+	return 0
+
+}
+
+func (gameBoard *Board) CopyBoard() *Board {
+	newB := Board{
+		BoardState: gameBoard.BoardState,
+		Rows:       gameBoard.Rows,
+		Cols:       gameBoard.Cols,
+		Turn:       gameBoard.Turn,
+		LastMove:   gameBoard.LastMove,
+	}
+	return &newB
+}
+
+//print board to terminal
+func (board *Board) PrintBoard() {
+	fmt.Println("    0       1       2       3       4       5       6       7       8 ")
+	for i, row := range board.BoardState {
+		fmt.Printf("%d ", i)
+
+		for j, piece := range row {
+			if j < 8 {
+				if piece == -1 {
+					fmt.Printf(" %d  -- ", piece)
+
+				} else {
+					fmt.Printf("  %d  -- ", piece)
+
+				}
+			} else {
+				if piece == -1 {
+					fmt.Printf(" %d  ", piece)
+
+				} else {
+					fmt.Printf("  %d  ", piece)
+
+				}
+			}
+		}
+		if i < 4 {
+			if i%2 == 0 {
+				fmt.Println("\n    |   \\   |   /   |   \\   |   /   |   \\   |   /   |   \\   |   /   |")
+				fmt.Println("\n    |     \\ | /     |     \\ | /     |     \\ | /     |     \\ | /     |")
+
+			} else {
+				fmt.Println("\n    |   /   |   \\   |   /   |   \\   |   /   |   \\   |   /   |   \\   |")
+				fmt.Println("\n    | /     |     \\ | /     |     \\ | /     |     \\ | /     |     \\ |")
+
+			}
+
+		}
+
+	}
+}
+
+//print board to terminal
+func (board *Board) ToString() string {
+	var str string
+	str += "    0       1       2       3       4       5       6       7       8 \n"
+	for i, row := range board.BoardState {
+		str += fmt.Sprintf("%d ", i)
+
+		for j, piece := range row {
+			if j < 8 {
+				if piece == -1 {
+					str += fmt.Sprintf(" %d  -- ", piece)
+
+				} else {
+					str += fmt.Sprintf("  %d  -- ", piece)
+
+				}
+			} else {
+				if piece == -1 {
+					str += fmt.Sprintf(" %d  ", piece)
+
+				} else {
+					str += fmt.Sprintf("  %d  ", piece)
+
+				}
+			}
+		}
+		if i < 4 {
+			if i%2 == 0 {
+				str += fmt.Sprintf("\n    |   \\   |   /   |   \\   |   /   |   \\   |   /   |   \\   |   /   |\n")
+				str += fmt.Sprintf("\n    |     \\ | /     |     \\ | /     |     \\ | /     |     \\ | /     |\n")
+
+			} else {
+				str += fmt.Sprintf("\n    |   /   |   \\   |   /   |   \\   |   /   |   \\   |   /   |   \\   |\n")
+				str += fmt.Sprintf("\n    | /     |     \\ | /     |     \\ | /     |     \\ | /     |     \\ |\n")
+
+			}
+
+		}
+
+	}
+	return str
+}
+*/
